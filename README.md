@@ -8,10 +8,10 @@
 ## 🌟 Fonctionnalités Clés
 
 - **100% Gratuit / Zéro clé API payante :**
-  - **Météo temps réel & prévisions 12h :** [Open-Meteo](https://open-meteo.com/) (vent à 10m sol & 80m altitude, rafales, température, probabilité de pluie, couverture nuageuse par étage, visibilité).
+  - **Météo temps réel & prévisions 12h :** [Open-Meteo](https://open-meteo.com/) (vent au sol à 10m et en altitude à 80m & 150m via 3 jauges dédiées, rafales, température, probabilité de pluie, couverture nuageuse par étage, visibilité).
   - **Activité géomagnétique (Indice Kp) :** Flux JSON officiel de la [NOAA Space Weather Prediction Center (SWPC)](https://services.swpc.noaa.gov/).
   - **Éphémérides solaires & lunaires :** Calculs locaux haute précision via [SunCalc.js](https://github.com/mourner/suncalc) (lever/coucher, Golden Hour, Heure Bleue, Nuit Astronomique, phases et illumination de la Lune).
-  - **Carte interactive des zones de vol :** [Leaflet.js](https://leafletjs.com/) avec tuiles sombres CartoDB et bouton d'accès direct à la carte officielle Géoportail des restrictions UAS en France.
+  - **Zones de restrictions UAS :** Accès direct en 1 clic à la carte officielle Géoportail des restrictions de vol pour drones en France centrée sur vos coordonnées GPS.
   - **Géolocalisation & Recherche :** API `navigator.geolocation` avec géocodage inverse et champ de recherche OpenStreetMap / Nominatim.
 
 - **Indicateurs Métier GO / NO-GO :**

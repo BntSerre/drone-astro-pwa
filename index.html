@@ -18,8 +18,7 @@
   <!-- Icône Apple -->
   <link rel="apple-touch-icon" href="icons/icon-192.png">
 
-  <!-- Feuilles de style externes -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <!-- Feuilles de style -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -144,15 +143,19 @@
         <h2>Vent</h2>
       </div>
       <div class="card-body">
-        <!-- Jauges de vent circulaires -->
+        <!-- Jauges de vent sol & altitude (10m, 80m, 150m) -->
         <div class="gauges-row">
           <div class="gauge-container" id="gauge-wind-10m">
-            <!-- Jauge SVG rendue par le JS -->
+            <!-- Jauge SVG Sol (10m) -->
             <div class="gauge-label">Sol (10m)</div>
           </div>
           <div class="gauge-container" id="gauge-wind-80m">
-            <!-- Jauge SVG rendue par le JS -->
-            <div class="gauge-label">Altitude (80m)</div>
+            <!-- Jauge SVG Altitude (80m) -->
+            <div class="gauge-label">Alt. (80m)</div>
+          </div>
+          <div class="gauge-container" id="gauge-wind-150m">
+            <!-- Jauge SVG Altitude (150m) -->
+            <div class="gauge-label">Alt. (150m)</div>
           </div>
         </div>
         <!-- Rafales -->
@@ -399,9 +402,9 @@
     </section>
 
     <!-- ============================================================
-         CARTE & ZONES DE VOL
+         ZONES DE RESTRICTIONS UAS (GÉOPORTAIL)
          ============================================================ -->
-    <section class="card" id="map-card">
+    <section class="card" id="uas-card">
       <div class="card-header">
         <!-- Icône carte avec couches -->
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -409,18 +412,20 @@
           <line x1="8" y1="2" x2="8" y2="18"/>
           <line x1="16" y1="6" x2="16" y2="22"/>
         </svg>
-        <h2>Carte &amp; Zones de vol</h2>
+        <h2>Zones de Restrictions Drones (UAS)</h2>
       </div>
-      <div class="card-body map-body">
-        <div id="map" class="map-container" role="application" aria-label="Carte interactive des zones de vol"></div>
-        <button id="btn-geoportail" class="btn-geoportail" aria-label="Ouvrir les zones UAS sur Géoportail">
+      <div class="card-body">
+        <p class="text-xs text-muted" style="margin-bottom: 12px; line-height: 1.45;">
+          Accédez directement à la carte officielle DGAC / Géoportail des restrictions de vol pour drones (hauteurs autorisées 30m, 50m, 100m, 120m, 150m, zones interdites et aérodromes) centrée sur vos coordonnées GPS.
+        </p>
+        <button id="btn-geoportail" class="btn-geoportail-full" aria-label="Ouvrir les zones UAS sur Géoportail">
           <!-- Icône lien externe -->
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
             <polyline points="15 3 21 3 21 9"/>
             <line x1="10" y1="14" x2="21" y2="3"/>
           </svg>
-          Zones UAS — Géoportail
+          Ouvrir la Carte Géoportail UAS France
         </button>
       </div>
     </section>
@@ -453,7 +458,6 @@
   <!-- ============================================================
        SCRIPTS (chargés en fin de corps pour performance)
        ============================================================ -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.js"></script>
   <script src="app.js" defer></script>

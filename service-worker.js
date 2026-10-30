@@ -1,4 +1,4 @@
-const CACHE_NAME = 'droneastro-v1';
+const CACHE_NAME = 'droneastro-v2';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -7,8 +7,6 @@ const STATIC_ASSETS = [
   './manifest.json',
   './icons/icon-192.svg',
   './icons/icon-512.svg',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.js'
 ];

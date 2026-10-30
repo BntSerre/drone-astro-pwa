@@ -51,9 +51,7 @@ const state = {
   lastUpdate: null
 };
 
-// Instances Leaflet et Chart.js
-let leafletMap = null;
-let leafletMarker = null;
+// Instance Chart.js
 let forecastChart = null;
 
 // ── 3. GÉOLOCALISATION & RECHERCHE DE LIEU ──────────────────────────────────
@@ -106,7 +104,6 @@ async function applyLocation(lat, lon, explicitName = null) {
     reverseGeocode(state.lat, state.lon);
   }
 
-  updateMapPosition(state.lat, state.lon);
   await refreshAllData();
 }
 
@@ -207,24 +204,38 @@ function setupSearchListeners() {
 // ── 4. MODULE MÉTÉO (OPEN-METEO) ────────────────────────────────────────────
 
 /**
- * Récupère les données météo Open-Meteo pour le sol et l'altitude sur 12h.
+ * Récupère les données météo Open-Meteo pour le sol (10m) et l'altitude (80m & 150m) sur 12h.
  */
 async function fetchWeather(lat, lon) {
   const url = `${CONFIG.OPEN_METEO_URL}?latitude=${lat}&longitude=${lon}` +
     `&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,precipitation_probability,cloud_cover,visibility` +
-    `&hourly=temperature_2m,wind_speed_10m,wind_speed_80m,wind_gusts_10m,precipitation_probability,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility` +
+    `&hourly=temperature_2m,wind_speed_10m,wind_speed_80m,wind_speed_120m,wind_speed_150m,wind_gusts_10m,precipitation_probability,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility` +
     `&forecast_hours=12&timezone=auto`;
 
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
   const data = await res.json();
 
+  const wind10m = data.current?.wind_speed_10m ?? 0;
+  const wind80m = data.hourly?.wind_speed_80m?.[0] ?? (wind10m * 1.35);
+
+  // Vitesse du vent à 150m (plafond légal drone)
+  let wind150m = data.hourly?.wind_speed_150m?.[0];
+  if (wind150m === undefined || wind150m === null) {
+    const wind120m = data.hourly?.wind_speed_120m?.[0] ?? (wind80m * 1.15);
+    wind150m = wind120m * 1.1;
+  }
+
+  // Série horaire 150m pour le graphique
+  const hourlyWind150 = data.hourly?.wind_speed_150m || data.hourly?.wind_speed_120m?.map(w => w * 1.1) || data.hourly?.wind_speed_80m?.map(w => w * 1.25) || [];
+
   return {
     current: {
       temperature: data.current?.temperature_2m ?? 0,
       humidity: data.current?.relative_humidity_2m ?? 0,
-      wind10m: data.current?.wind_speed_10m ?? 0,
-      wind80m: data.hourly?.wind_speed_80m?.[0] ?? (data.current?.wind_speed_10m ? data.current.wind_speed_10m * 1.35 : 0),
+      wind10m,
+      wind80m,
+      wind150m,
       gusts: data.current?.wind_gusts_10m ?? 0,
       rainProb: data.current?.precipitation_probability ?? 0,
       cloudTotal: data.current?.cloud_cover ?? 0,
@@ -233,7 +244,10 @@ async function fetchWeather(lat, lon) {
       cloudMid: data.hourly?.cloud_cover_mid?.[0] ?? 0,
       cloudHigh: data.hourly?.cloud_cover_high?.[0] ?? 0
     },
-    hourly: data.hourly || {}
+    hourly: {
+      ...data.hourly,
+      wind_speed_150m: hourlyWind150
+    }
   };
 }
 
@@ -304,7 +318,6 @@ function calculateEphemeris(lat, lon, date = new Date()) {
 function isAstroNightActive(eph) {
   if (!eph || !eph.times) return false;
   const now = new Date();
-  // Nuit active si après 'night' ce soir OU avant 'nightEnd' ce matin
   if (eph.times.night && now >= eph.times.night) return true;
   if (eph.times.nightEnd && now <= eph.times.nightEnd) return true;
   return false;
@@ -334,6 +347,7 @@ function getMoonPhaseName(phase) {
  */
 function evaluateDroneStatus(currentWeather, kp) {
   const wind = currentWeather.wind10m;
+  const wind150 = currentWeather.wind150m;
   const gusts = currentWeather.gusts;
   const rain = currentWeather.rainProb;
   const reasons = [];
@@ -341,31 +355,35 @@ function evaluateDroneStatus(currentWeather, kp) {
   const isRed = (wind > CONFIG.DRONE.WIND_WARN) ||
                 (gusts > CONFIG.DRONE.GUST_WARN) ||
                 (rain > 0) ||
-                (kp >= CONFIG.DRONE.KP_DANGER);
+                (kp >= CONFIG.DRONE.KP_DANGER) ||
+                (wind150 > 38);
 
   if (isRed) {
-    if (wind > CONFIG.DRONE.WIND_WARN) reasons.push(`Vent excessif sol (${wind.toFixed(0)} km/h > 28)`);
-    if (gusts > CONFIG.DRONE.GUST_WARN) reasons.push(`Rafales dangereuses (${gusts.toFixed(0)} km/h > 32)`);
+    if (wind > CONFIG.DRONE.WIND_WARN) reasons.push(`Vent sol ${wind.toFixed(0)} km/h (>28)`);
+    if (gusts > CONFIG.DRONE.GUST_WARN) reasons.push(`Rafales ${gusts.toFixed(0)} km/h (>32)`);
     if (rain > 0) reasons.push(`Risque pluie (${rain}%)`);
     if (kp >= CONFIG.DRONE.KP_DANGER) reasons.push(`Perturbation GPS / Kp ${kp.toFixed(1)} ≥ 5`);
+    if (wind150 > 38) reasons.push(`Vent fort à 150m (${wind150.toFixed(0)} km/h)`);
     return { status: 'danger', label: 'NO-GO', reasons: reasons.join(' · ') };
   }
 
   const isOrange = (wind >= CONFIG.DRONE.WIND_GO) ||
                    (gusts >= CONFIG.DRONE.GUST_GO) ||
-                   (Math.round(kp) === CONFIG.DRONE.KP_GO);
+                   (Math.round(kp) === CONFIG.DRONE.KP_GO) ||
+                   (wind150 >= 30);
 
   if (isOrange) {
-    if (wind >= CONFIG.DRONE.WIND_GO) reasons.push(`Vent modéré (${wind.toFixed(0)} km/h)`);
-    if (gusts >= CONFIG.DRONE.GUST_GO) reasons.push(`Rafales notables (${gusts.toFixed(0)} km/h)`);
+    if (wind >= CONFIG.DRONE.WIND_GO) reasons.push(`Vent sol ${wind.toFixed(0)} km/h`);
+    if (gusts >= CONFIG.DRONE.GUST_GO) reasons.push(`Rafales ${gusts.toFixed(0)} km/h`);
     if (Math.round(kp) === CONFIG.DRONE.KP_GO) reasons.push(`Kp modéré (4.0)`);
+    if (wind150 >= 30) reasons.push(`Vent 150m soutenu (${wind150.toFixed(0)} km/h)`);
     return { status: 'warning', label: 'PRUDENCE', reasons: reasons.join(' · ') };
   }
 
   return {
     status: 'go',
     label: 'GO',
-    reasons: `Vent ${wind.toFixed(0)} km/h · Rafales ${gusts.toFixed(0)} km/h · Ciel sec · Kp ${kp.toFixed(1)}`
+    reasons: `Sol ${wind.toFixed(0)} km/h · 150m ${wind150.toFixed(0)} km/h · Rafales ${gusts.toFixed(0)} km/h · Ciel sec`
   };
 }
 
@@ -430,26 +448,26 @@ function updateStatusBadges(droneRes, astroRes) {
 }
 
 /**
- * Génère une jauge semi-circulaire SVG propre et réactive.
+ * Génère une jauge semi-circulaire SVG compacte et réactive (pour 3 jauges côte à côte).
  */
 function renderSemiGauge(containerId, value, maxVal, unit, label, warnVal, dangerVal) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  const w = 150;
-  const h = 88;
-  const cx = 75;
-  const cy = 76;
-  const r = 58;
-  const strokeW = 10;
+  const w = 110;
+  const h = 70;
+  const cx = 55;
+  const cy = 62;
+  const r = 42;
+  const strokeW = 7.5;
   const semiCirc = Math.PI * r;
 
   const clamped = Math.min(Math.max(value, 0), maxVal);
   const ratio = clamped / maxVal;
   const dashOffset = semiCirc * (1 - ratio);
 
-  let strokeColor = '#10b981'; // Green
-  if (value > dangerVal) strokeColor = '#ef4444'; // Red
+  let strokeColor = '#10b981'; // Vert
+  if (value > dangerVal) strokeColor = '#ef4444'; // Rouge
   else if (value >= warnVal) strokeColor = '#f59e0b'; // Orange
 
   container.innerHTML = `
@@ -459,22 +477,23 @@ function renderSemiGauge(containerId, value, maxVal, unit, label, warnVal, dange
       <path d="M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}"
             fill="none" stroke="${strokeColor}" stroke-width="${strokeW}" stroke-linecap="round"
             stroke-dasharray="${semiCirc}" stroke-dashoffset="${dashOffset}"
-            style="transition: stroke-dashoffset 0.8s ease, stroke 0.4s ease; filter: drop-shadow(0 0 6px ${strokeColor});"/>
-      <text x="${cx}" y="${cy - 14}" text-anchor="middle" fill="#f8fafc"
-            font-size="22" font-weight="800" font-family="system-ui, sans-serif">${Math.round(value)}</text>
+            style="transition: stroke-dashoffset 0.8s ease, stroke 0.4s ease; filter: drop-shadow(0 0 5px ${strokeColor});"/>
+      <text x="${cx}" y="${cy - 12}" text-anchor="middle" fill="#f8fafc"
+            font-size="18" font-weight="800" font-family="system-ui, sans-serif">${Math.round(value)}</text>
       <text x="${cx}" y="${cy + 1}" text-anchor="middle" fill="#94a3b8"
-            font-size="10" font-weight="600">${unit}</text>
+            font-size="8.5" font-weight="600">${unit}</text>
     </svg>
     <div class="gauge-label">${label}</div>
   `;
 }
 
 /**
- * Met à jour la carte Vent (10m, 80m et rafales).
+ * Met à jour la carte Vent avec 3 jauges (Sol 10m, Alt 80m, Alt 150m) et rafales.
  */
 function updateWindCard(cur) {
   renderSemiGauge('gauge-wind-10m', cur.wind10m, 50, 'km/h', 'Sol (10m)', CONFIG.DRONE.WIND_GO, CONFIG.DRONE.WIND_WARN);
-  renderSemiGauge('gauge-wind-80m', cur.wind80m, 60, 'km/h', 'Altitude (80m)', CONFIG.DRONE.WIND_GO * 1.25, CONFIG.DRONE.WIND_WARN * 1.25);
+  renderSemiGauge('gauge-wind-80m', cur.wind80m, 60, 'km/h', 'Alt. (80m)', CONFIG.DRONE.WIND_GO * 1.25, CONFIG.DRONE.WIND_WARN * 1.25);
+  renderSemiGauge('gauge-wind-150m', cur.wind150m, 70, 'km/h', 'Alt. (150m)', CONFIG.DRONE.WIND_GO * 1.45, CONFIG.DRONE.WIND_WARN * 1.45);
 
   const gustValEl = document.getElementById('gust-value');
   const gustBarEl = document.getElementById('gust-bar');
@@ -658,7 +677,7 @@ function updateMoonCard(eph) {
 // ── 9. MODULE GRAPHIQUE 6 HEURES (CHART.JS) ─────────────────────────────────
 
 /**
- * Initialise le graphique Chart.js avec double axe Y et thème sombre.
+ * Initialise le graphique Chart.js avec double axe Y et thème sombre (incluant vent 150m).
  */
 function initForecastChart() {
   const canvas = document.getElementById('forecast-chart');
@@ -672,27 +691,40 @@ function initForecastChart() {
       labels: [],
       datasets: [
         {
-          label: 'Vent (km/h)',
+          label: 'Vent Sol (10m)',
           data: [],
           borderColor: '#06b6d4',
-          backgroundColor: 'rgba(6, 182, 212, 0.15)',
+          backgroundColor: 'rgba(6, 182, 212, 0.12)',
           fill: true,
           tension: 0.35,
-          borderWidth: 2.5,
-          pointRadius: 3,
+          borderWidth: 2,
+          pointRadius: 2.5,
           pointBackgroundColor: '#06b6d4',
           yAxisID: 'y'
         },
         {
-          label: 'Rafales (km/h)',
+          label: 'Vent Alt (150m)',
+          data: [],
+          borderColor: '#3b82f6',
+          borderDash: [3, 3],
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.35,
+          borderWidth: 1.8,
+          pointRadius: 2,
+          pointBackgroundColor: '#3b82f6',
+          yAxisID: 'y'
+        },
+        {
+          label: 'Rafales',
           data: [],
           borderColor: '#f59e0b',
           borderDash: [4, 4],
           backgroundColor: 'transparent',
           fill: false,
           tension: 0.35,
-          borderWidth: 2,
-          pointRadius: 2.5,
+          borderWidth: 1.8,
+          pointRadius: 2,
           pointBackgroundColor: '#f59e0b',
           yAxisID: 'y'
         },
@@ -700,11 +732,11 @@ function initForecastChart() {
           label: 'Nuages (%)',
           data: [],
           borderColor: '#a855f7',
-          backgroundColor: 'rgba(168, 85, 247, 0.12)',
+          backgroundColor: 'rgba(168, 85, 247, 0.1)',
           fill: true,
           tension: 0.35,
-          borderWidth: 2,
-          pointRadius: 2.5,
+          borderWidth: 1.8,
+          pointRadius: 2,
           pointBackgroundColor: '#a855f7',
           yAxisID: 'y1'
         }
@@ -722,8 +754,8 @@ function initForecastChart() {
           position: 'bottom',
           labels: {
             color: '#94a3b8',
-            font: { size: 10, weight: '600' },
-            boxWidth: 12,
+            font: { size: 9.5, weight: '600' },
+            boxWidth: 10,
             padding: 8
           }
         },
@@ -775,77 +807,32 @@ function updateForecastChart(hourly) {
 
   const count = Math.min(6, hourly.time.length);
   const labels = [];
-  const windData = [];
+  const wind10Data = [];
+  const wind150Data = [];
   const gustData = [];
   const cloudData = [];
 
   for (let i = 0; i < count; i++) {
     const dt = new Date(hourly.time[i]);
     labels.push(dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }));
-    windData.push(hourly.wind_speed_10m[i]);
+    wind10Data.push(hourly.wind_speed_10m[i]);
+    wind150Data.push(hourly.wind_speed_150m?.[i] ?? (hourly.wind_speed_10m[i] * 1.5));
     gustData.push(hourly.wind_gusts_10m[i]);
     cloudData.push(hourly.cloud_cover[i]);
   }
 
   forecastChart.data.labels = labels;
-  forecastChart.data.datasets[0].data = windData;
-  forecastChart.data.datasets[1].data = gustData;
-  forecastChart.data.datasets[2].data = cloudData;
+  forecastChart.data.datasets[0].data = wind10Data;
+  forecastChart.data.datasets[1].data = wind150Data;
+  forecastChart.data.datasets[2].data = gustData;
+  forecastChart.data.datasets[3].data = cloudData;
   forecastChart.update();
 }
 
-// ── 10. MODULE CARTE & ZONES DE VOL (LEAFLET) ───────────────────────────────
+// ── 10. MODULE ZONES DE VOL (GÉOPORTAIL) ────────────────────────────────────
 
 /**
- * Initialise la carte Leaflet avec tuiles Carto Dark Matter.
- */
-function initMap(lat, lon) {
-  const mapEl = document.getElementById('map');
-  if (!mapEl || typeof L === 'undefined') return;
-
-  try {
-    leafletMap = L.map('map', {
-      center: [lat, lon],
-      zoom: 12,
-      zoomControl: true,
-      attributionControl: false
-    });
-
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd',
-      maxZoom: 19
-    }).addTo(leafletMap);
-
-    const customIcon = L.divIcon({
-      className: 'custom-marker',
-      html: '<div class="marker-dot"></div>',
-      iconSize: [20, 20],
-      iconAnchor: [10, 10]
-    });
-
-    leafletMarker = L.marker([lat, lon], { icon: customIcon }).addTo(leafletMap);
-    leafletMarker.bindPopup(`<strong>Point d'envol</strong><br>${lat}°N, ${lon}°E`);
-
-    setTimeout(() => {
-      if (leafletMap) leafletMap.invalidateSize();
-    }, 400);
-  } catch (err) {
-    console.warn('[DroneAstro] Leaflet init error:', err);
-  }
-}
-
-/**
- * Déplace la vue et le marqueur Leaflet.
- */
-function updateMapPosition(lat, lon) {
-  if (!leafletMap || !leafletMarker) return;
-  leafletMarker.setLatLng([lat, lon]);
-  leafletMarker.setPopupContent(`<strong>Point d'envol</strong><br>${lat}°N, ${lon}°E`);
-  leafletMap.setView([lat, lon], 12);
-}
-
-/**
- * Ouvre la carte Géoportail des restrictions UAS drones en France.
+ * Ouvre la carte Géoportail des restrictions UAS drones en France centrée sur la position GPS.
  */
 function openGeoportailUAS() {
   const lat = state.lat ?? CONFIG.DEFAULT_LAT;
@@ -935,8 +922,7 @@ function initApp() {
       .catch((e) => console.warn('[DroneAstro] Échec Service Worker:', e));
   }
 
-  // Initialisation carte et graphique
-  initMap(CONFIG.DEFAULT_LAT, CONFIG.DEFAULT_LON);
+  // Initialisation graphique prévisions
   initForecastChart();
 
   // Écouteurs de recherche et boutons
